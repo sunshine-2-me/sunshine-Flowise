@@ -238,8 +238,13 @@ Resources:
   SumoFlowiseCloudWatchLogsGroupFlowise:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Ref AWS::StackName
+      LogGroupName: !Join ["/", [!Ref Stage, log-group, !Ref CurrentEnv]]
       RetentionInDays: 7
+      Tags:
+        - Key: Name
+          Value: !Join ["/", [!Ref Stage, log-group, !Ref CurrentEnv]]
+        - Key: CurrentEnv
+          Value: !Ref CurrentEnv
 
 Outputs:
   SumoFlowiseServiceFlowiseId:
