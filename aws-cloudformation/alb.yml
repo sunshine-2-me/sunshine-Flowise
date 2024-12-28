@@ -1,0 +1,179 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: This template creates resources for Flowise application
+
+Parameters:
+  Stage:
+    Description: Prefix of resource names
+    Type: String
+    Default: sumo-flowise
+
+  CurrentEnv:
+    Description: "Deployment environment (e.g., dev, prod)"
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+
+  # SumoFlowiseCertificateArn:
+  #   Description: Certificate ARN
+  #   Type: String
+
+Resources:
+  ####
+  # ALB related resources
+  ####
+  SumoFlowisePublicLoadBalancerSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Join ["-", [!Ref Stage, public-lb-sg, !Ref CurrentEnv]]
+      GroupDescription: Access to the public facing load balancer
+      VpcId: !ImportValue 
+        Fn::Join: ["-", [!Ref Stage, "VPCId", !Ref CurrentEnv]]
+      SecurityGroupIngress:
+        # - CidrIp: 0.0.0.0/0
+        #   IpProtocol: -1
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref Stage, PublicLoadBalancerSG, !Ref CurrentEnv]]
+        - Key: Environment
+          Value: !Ref CurrentEnv
+
+  SumoFlowisePublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Join ["-", [!Ref Stage, public-lb, !Ref CurrentEnv]]
+      Scheme: internet-facing
+      # LoadBalancerAttributes:
+      #   - Key: idle_timeout.timeout_seconds
+      #     Value: "30"
+      Subnets:
+        - !ImportValue
+          Fn::Join: ["-", [!Ref Stage, "Public1Id", !Ref CurrentEnv]]
+        - !ImportValue 
+          Fn::Join: ["-", [!Ref Stage, "Public2Id", !Ref CurrentEnv]]
+      SecurityGroups: [!Ref SumoFlowisePublicLoadBalancerSG]
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref Stage, PublicLoadBalancer, !Ref CurrentEnv]]
+        - Key: CurrentEnv
+          Value: !Ref CurrentEnv
+
+  # A dummy target group is used to setup the ALB to just drop traffic
+  # initially, before any real service target groups have been added.
+  # SumoFlowiseDummyTargetGroupPublic:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties:
+  #     Name: !Join ["-", [!Ref Stage, dummy-tg, !Ref CurrentEnv]]
+  #     HealthCheckIntervalSeconds: 6
+  #     HealthCheckPath: /
+  #     HealthCheckProtocol: HTTP
+  #     HealthCheckTimeoutSeconds: 5
+  #     HealthyThresholdCount: 2
+  #     Port: 80
+  #     Protocol: HTTP
+  #     UnhealthyThresholdCount: 2
+  #     VpcId: !ImportValue 
+  #       Fn::Join: ["-", [!Ref Stage, "VPCId", !Ref CurrentEnv]]
+  #     Tags:
+  #       - Key: Name
+  #         Value: !Join ["-", [!Ref Stage, DummyTargetGroupPublic, !Ref CurrentEnv]]
+  #       - Key: CurrentEnv
+  #         Value: !Ref CurrentEnv
+
+  # SumoFlowisePublicLoadBalancerListenerHTTP:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   DependsOn:
+  #     - SumoFlowisePublicLoadBalancer
+  #   Properties:
+  #     DefaultActions:
+  #       - Type: "redirect"
+  #         RedirectConfig:
+  #           Protocol: "HTTPS"
+  #           Port: "443"
+  #           StatusCode: "HTTP_301"
+  #     LoadBalancerArn: !Ref SumoFlowisePublicLoadBalancer
+  #     Port: 80
+  #     Protocol: HTTP
+
+  # SumoFlowisePublicLoadBalancerListenerHTTPS:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   DependsOn:
+  #     - SumoFlowisePublicLoadBalancer
+  #   Properties:
+  #     DefaultActions:
+  #       - TargetGroupArn: !Ref SumoFlowiseDummyTargetGroupPublic
+  #         Type: "forward"
+  #     LoadBalancerArn: !Ref SumoFlowisePublicLoadBalancer
+  #     Port: 443
+  #     Protocol: HTTPS
+  #     Certificates:
+  #       - CertificateArn: !Ref SumoFlowiseCertificateArn
+
+  # SumoFlowisePublicLoadBalancerListenerHTTP:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   DependsOn:
+  #     - SumoFlowisePublicLoadBalancer
+  #   Properties:
+  #     DefaultActions:
+  #       - TargetGroupArn: !Ref SumoFlowiseDummyTargetGroupPublic
+  #         Type: "forward"
+  #     LoadBalancerArn: !Ref SumoFlowisePublicLoadBalancer
+  #     Port: 80
+  #     Protocol: HTTP
+
+Outputs:
+  SumoFlowiseLoadBalancerSGId:
+    Description: 'The ID of the load balancer'
+    Value: !Ref SumoFlowisePublicLoadBalancerSG
+    Export:
+      Name: !Join ["-", [!Ref Stage, LoadbalancerSGId, !Ref CurrentEnv]]
+
+  SumoFlowiseLoadBalancerId:
+    Description: 'The ID of the load balancer'
+    Value: !Ref SumoFlowisePublicLoadBalancer
+    Export:
+      Name: !Join ["-", [!Ref Stage, LoadbalancerId, !Ref CurrentEnv]]
+
+  SumoFlowiseLoadBalancerDNSName:
+    Description: 'DNS name of the load balancer'
+    Value: !GetAtt SumoFlowisePublicLoadBalancer.DNSName
+    Export:
+      Name: !Join ["-", [!Ref Stage, LoadbalancerDNSName, !Ref CurrentEnv]]
+
+  SumoFlowiseLoadBalancerCanonicalHostedZoneId:
+    Description: 'CanonicalHostedZoneId of the load balancer'
+    Value: !GetAtt SumoFlowisePublicLoadBalancer.CanonicalHostedZoneID
+    Export:
+      Name: !Join ["-", [!Ref Stage, LoadbalancerCanonicalHostedZoneId, !Ref CurrentEnv]]
+
+  # SumoFlowisePublicLoadBalancerListenerHTTPId:
+  #   Description: 'The ID of ElasticLoadBalancingV2::Listener'
+  #   Value: !Ref SumoFlowisePublicLoadBalancerListenerHTTP
+  #   Export:
+  #     Name: !Join ["-", [!Ref Stage, PublicLoadBalancerListenerHTTPId, !Ref CurrentEnv]]
+
+  ExternalUrl:
+    Description: The url of Flowise application
+    Value: !Sub http://${SumoFlowisePublicLoadBalancer.DNSName}

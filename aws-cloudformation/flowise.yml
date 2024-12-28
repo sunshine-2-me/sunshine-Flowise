@@ -1,0 +1,249 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: This template creates resources for Flowise application
+
+Parameters:
+  Stage:
+    Description: Prefix of resource names
+    Type: String
+    Default: sumo-flowise
+
+  CurrentEnv:
+    Description: "Deployment environment (e.g., dev, prod)"
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+
+  ECRImageUrl:
+    Description: The URL of the Docker image in ECR.
+    Type: String
+
+  ImageTag:
+    Description: The tag of the Docker image.
+    Type: String
+    Default: latest
+
+  DatabaseHost:
+    Description: The address of postgres
+    Type: String
+
+  DBUsername:
+    Description: 'The database admin account username'
+    NoEcho: true
+    Type: 'String'
+    MinLength: '1'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9]*'
+    ConstraintDescription: 'must begin with a letter and contain only alphanumeric characters.'
+
+  DBPassword:
+    Description: 'The database admin account password'
+    NoEcho: true
+    Type: 'String'
+    MinLength: '8'
+    MaxLength: '41'
+    AllowedPattern: '[a-zA-Z0-9@]*'
+    ConstraintDescription: 'must contain only alphanumeric characters and/or @.'
+
+  CertificateArn:
+    Description: Certificate ARN
+    Type: String
+
+  SecretArn:
+    Description: The Arn of Secret
+    Type: String
+
+Resources:
+  ####
+  # Flowise ECS service related resources
+  ####
+  SumoFlowiseTargetGroupFlowise:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !ImportValue 
+        Fn::Join: ["-", [!Ref Stage, VPCId, !Ref CurrentEnv]]
+      Port: 80
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 200-299
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      TargetType: ip
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref Stage, TargetGroupFlowise, !Ref CurrentEnv]]
+        - Key: CurrentEnv
+          Value: !Ref CurrentEnv
+
+  SumoFlowiseListenerHTTPS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref SumoFlowiseTargetGroupFlowise
+      LoadBalancerArn: !ImportValue 
+        Fn::Join: ["-", [!Ref Stage, LoadbalancerId, !Ref CurrentEnv]]
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+
+  SumoFlowiseListenerHTTP:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: "redirect"
+          RedirectConfig:
+            Protocol: "HTTPS"
+            Port: "443"
+            StatusCode: "HTTP_301"
+      LoadBalancerArn: !ImportValue 
+        Fn::Join: ["-", [!Ref Stage, LoadbalancerId, !Ref CurrentEnv]]
+      Port: 80
+      Protocol: HTTP
+
+  SumoFlowiseListenerRuleFlowise:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref SumoFlowiseListenerHTTPS
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /*
+      Actions:
+        - TargetGroupArn: !Ref SumoFlowiseTargetGroupFlowise
+          Type: forward
+
+  SumoFlowiseServiceFlowise:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - SumoFlowiseListenerRuleFlowise
+    Properties:
+      Cluster: !ImportValue 
+        Fn::Join: ["-", [!Ref Stage, SumoFlowiseECSClusterId, !Ref CurrentEnv]]
+      TaskDefinition: !Ref SumoFlowiseTaskDefinitionFlowise
+      LaunchType: FARGATE
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets:
+            - !ImportValue 
+              Fn::Join: ["-", [!Ref Stage, Private1Id, !Ref CurrentEnv]]
+            - !ImportValue 
+              Fn::Join: ["-", [!Ref Stage, Private2Id, !Ref CurrentEnv]]
+          SecurityGroups:
+            - !ImportValue 
+              Fn::Join: ["-", [!Ref Stage, SumoFlowiseContainerSecurityGroupId, !Ref CurrentEnv]]
+      LoadBalancers:
+        - ContainerName: "flowise-service"
+          ContainerPort: 3000
+          TargetGroupArn: !Ref SumoFlowiseTargetGroupFlowise
+      DeploymentConfiguration:
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+        MaximumPercent: 200
+        MinimumHealthyPercent: 50
+
+  SumoFlowiseTaskDefinitionFlowise:
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      ExecutionRoleArn: !ImportValue 
+        Fn::Join: ["-", [!Ref Stage, "ECSTaskExecutionRoleArn", !Ref CurrentEnv]]
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: "flowise-service"
+          Image: !Sub "${ECRImageUrl}:${ImageTag}" # Use dynamic Docker image URL and tag
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3000
+              Protocol: tcp
+          Environment:
+            - Name: Port
+              Value: "3000"
+            - Name: CORS_ORIGINS
+              Value: "*"
+            - Name: IFRAME_ORIGINS
+              Value: "*"
+            - Name: FLOWISE_PASSWORD
+              Value: !Sub "{{resolve:secretsmanager:${SecretArn}:SecretString:password}}"
+            - Name: FLOWISE_USERNAME
+              Value: !Sub "{{resolve:secretsmanager:${SecretArn}:SecretString:username}}"
+            - Name: DEBUG
+              Value: true
+            # - Name: DATABASE_PATH
+            #   Value: "/root/.flowise"
+            # - Name: DATABASE_TYPE
+            #   Value: "sqlite"
+            - Name: DATABASE_TYPE
+              Value: "postgres"
+            - Name: DATABASE_PORT
+              Value: 5432
+            - Name: DATABASE_HOST
+              Value: !Ref DatabaseHost
+            - Name: DATABASE_NAME
+              Value: "flowise"
+            - Name: DATABASE_USER
+              Value: !Ref DBUsername
+            - Name: DATABASE_PASSWORD
+              Value: !Ref DBPassword
+            - Name: DATABASE_SSL
+              Value: true
+            - Name: DATABASE_SSL_KEY_BASE64
+              Value: true
+            - Name: PGSSLMODE
+              Value: "require"
+            - Name: APIKEY_PATH
+              Value: "/root/.flowise"
+            - Name: SECRETKEY_PATH
+              Value: "/root/.flowise"
+            - Name: LOG_PATH
+              Value: "/root/.flowise/logs"
+            - Name: BLOB_STORAGE_PATH
+              Value: "/root/.flowise/storage"
+          EntryPoint:
+            - /bin/sh
+            - -c
+            - "sleep 3; pnpm start"
+          MountPoints:
+            - SourceVolume: efs-volume
+              ContainerPath: "/root/.flowise"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref SumoFlowiseCloudWatchLogsGroupFlowise
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref Stage
+      NetworkMode: awsvpc
+      Memory: "8192"
+      Cpu: "4096"
+      Volumes:
+        - Name: efs-volume
+          EFSVolumeConfiguration:
+            FilesystemId: !ImportValue 
+              Fn::Join: ["-", [!Ref Stage, "EFSFileSystemId", !Ref CurrentEnv]]
+            RootDirectory: /
+            TransitEncryption: ENABLED
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref Stage, task-definition, !Ref CurrentEnv]]
+        - Key: CurrentEnv
+          Value: !Ref CurrentEnv
+
+  SumoFlowiseCloudWatchLogsGroupFlowise:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref AWS::StackName
+      RetentionInDays: 7
+
+Outputs:
+  SumoFlowiseServiceFlowiseId:
+    Description: 'The ECS::Service ID'
+    Value: !Ref SumoFlowiseServiceFlowise
+    Export:
+      Name: !Join ["-", [!Ref Stage, SumoFlowiseServiceFlowiseId, !Ref CurrentEnv]]
