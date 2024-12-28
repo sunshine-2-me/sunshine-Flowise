@@ -53,6 +53,12 @@ Resources:
                 Action:
                   - logs:*
                 Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref Stage, lambda, !Ref CurrentEnv]]
+        - Key: CurrentEnv
+          Value: !Ref CurrentEnv
+
   # Lambda Function: Retrieve Credentials
   SumoFlowiseGetCredentialLambdaFunction:
     Type: AWS::Lambda::Function

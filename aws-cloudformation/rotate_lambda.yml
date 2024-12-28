@@ -41,6 +41,11 @@ Resources:
                 Action:
                   - logs:*
                 Resource: "*"
+      Tags:
+        - Key: Name
+          Value: !Join ["-", [!Ref Stage, rotate-lambda, !Ref CurrentEnv]]
+        - Key: CurrentEnv
+          Value: !Ref CurrentEnv
 
   SumoFlowiseRotateLambdaFunction:
     Type: AWS::Lambda::Function
