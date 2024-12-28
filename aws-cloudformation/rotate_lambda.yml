@@ -20,7 +20,7 @@ Resources:
   SumoFlowiseRotateLambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: SumoFlowiseRotateLambdaExecutionRole
+      RoleName: !Join ["-", [!Ref Stage, rotate-lambda-role, !Ref CurrentEnv]]
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -43,7 +43,7 @@ Resources:
                 Resource: "*"
       Tags:
         - Key: Name
-          Value: !Join ["-", [!Ref Stage, rotate-lambda, !Ref CurrentEnv]]
+          Value: !Join ["-", [!Ref Stage, rotate-lambda-role, !Ref CurrentEnv]]
         - Key: CurrentEnv
           Value: !Ref CurrentEnv
 
