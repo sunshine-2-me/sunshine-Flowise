@@ -116,12 +116,12 @@ The GitHub Actions workflow (`.github/workflows/deploy-flowise.yml`) automates t
 ## Outputs
 After a successful deployment, the following outputs will be available:
 
-- **Application URL**: The URL of the Flowise application (e.g., https://flowise.sumoscheduler.com).
+- **Application URL**: The URL of the Flowise application (e.g., https://flowise.sumoscheduler.com or https://dev-flowise.sumoscheduler.com).
 
 - **API Gateway Endpoints**:
-  - **Get Credentials**: API to retrieve database credentials.
+  - **Get Credentials**: API to retrieve application credentials.
 
-  - **Rotate Password**: API to rotate database credentials.
+  - **Rotate Password**: API to rotate application credentials.
 
 ## User Roles and Permissions
 The following AWS IAM roles and permissions are configured for different user groups:
